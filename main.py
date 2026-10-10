@@ -1,8 +1,10 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from datetime import date
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///research_opportunities.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -207,7 +209,10 @@ def delete_opportunity(opportunity_id):
     return jsonify({
         "message": "Research opportunity deleted successfully"
     }), 200
-
+@app.errorhandler(500)
+def internal_error(error):
+    db.session.rollback()
+    return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)
