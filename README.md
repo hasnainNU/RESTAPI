@@ -73,4 +73,4 @@ The database file (`research_opportunities.db`) is created automatically the fir
 
 ## Author
 
-Your Name
+https://github.com/hasnainNU
