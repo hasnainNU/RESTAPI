@@ -1,218 +1,120 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from flask_sqlalchemy import SQLAlchemy
-from datetime import date
-from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
 
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///research_opportunities.db"
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
+# create database
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///research.db'
 db = SQLAlchemy(app)
 
+FIELDS = [
+    'Research_title', 'Research_description', 'Research_area', 'Faculty_name',
+    'Departement', 'Required_skills', 'Avaliable_positions',
+    'Application_deadline', 'status',
+]
 
-class ResearchOpportunity(db.Model):
+
+class Research(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    research_title = db.Column(db.String(200), nullable=False)
-    research_description = db.Column(db.Text, nullable=False)
-    research_area = db.Column(db.String(100), nullable=False)
-    faculty_name = db.Column(db.String(100), nullable=False)
-    department = db.Column(db.String(100), nullable=False)
-    required_skills = db.Column(db.String(300), nullable=False)
-    available_positions = db.Column(db.Integer, nullable=False)
-    application_deadline = db.Column(db.String(10), nullable=False)
-    status = db.Column(db.String(10), nullable=False, default="Open")
+    Research_title = db.Column(db.String(100), nullable=False)
+    Research_description = db.Column(db.String(500), nullable=False)
+    Research_area = db.Column(db.String(100), nullable=False)
+    Faculty_name = db.Column(db.String(100), nullable=False)
+    Departement = db.Column(db.String(100), nullable=False)
+    Required_skills = db.Column(db.String(200), nullable=False)
+    Avaliable_positions = db.Column(db.Integer, nullable=False)
+    Application_deadline = db.Column(db.String(100), nullable=False)
+    status = db.Column(db.String(100), nullable=False)
 
     def to_dict(self):
-        return {
-            "id": self.id,
-            "research_title": self.research_title,
-            "research_description": self.research_description,
-            "research_area": self.research_area,
-            "faculty_name": self.faculty_name,
-            "department": self.department,
-            "required_skills": self.required_skills,
-            "available_positions": self.available_positions,
-            "application_deadline": self.application_deadline,
-            "status": self.status
-        }
+        d = {'id': self.id}
+        for f in FIELDS:
+            d[f] = getattr(self, f)
+        return d
 
 
 with app.app_context():
     db.create_all()
 
 
-def validate_opportunity(data, is_update=False):
+def read_body():
+    """Return (data, error_response). Checks all required fields exist."""
+    data = request.get_json(silent=True)
     if not isinstance(data, dict):
-        return "Request body must be a JSON object"
-
-    required_fields = [
-        "research_title",
-        "research_description",
-        "research_area",
-        "faculty_name",
-        "department",
-        "required_skills",
-        "available_positions",
-        "application_deadline"
-    ]
-
-    if not is_update:
-        for field in required_fields:
-            if field not in data:
-                return field + " is required"
-
-    string_fields = [
-        "research_title",
-        "research_description",
-        "research_area",
-        "faculty_name",
-        "department",
-        "required_skills",
-        "application_deadline"
-    ]
-
-    for field in string_fields:
-        if field in data:
-            if not isinstance(data[field], str) or not data[field].strip():
-                return field + " must be a non-empty string"
-
-    if "available_positions" in data:
-        positions = data["available_positions"]
-
-        if type(positions) is not int or positions < 1:
-            return "available_positions must be a positive integer"
-
-    if "status" in data:
-        if data["status"] not in ["Open", "Closed"]:
-            return "status must be Open or Closed"
-
-    if "application_deadline" in data:
-        try:
-            date.fromisoformat(data["application_deadline"])
-        except ValueError:
-            return "application_deadline must use YYYY-MM-DD format"
-
-    return None
+        return None, (jsonify({'message': 'Invalid JSON body'}), 400)
+    missing = [f for f in FIELDS if f not in data or data[f] in (None, '')]
+    if missing:
+        return None, (jsonify({'message': 'Missing fields: ' + ', '.join(missing)}), 400)
+    try:
+        data['Avaliable_positions'] = int(data['Avaliable_positions'])
+    except (TypeError, ValueError):
+        return None, (jsonify({'message': 'Available positions must be a number'}), 400)
+    if data['Avaliable_positions'] < 1:
+        return None, (jsonify({'message': 'Available positions must be at least 1'}), 400)
+    if data['status'] not in ('Open', 'Closed'):
+        return None, (jsonify({'message': 'Status must be Open or Closed'}), 400)
+    return data, None
 
 
-@app.route("/", methods=["GET"])
+# create routes
+@app.route('/')
 def home():
-    return jsonify({
-        "message": "Research Opportunity Portal API is running"
-    }), 200
+    return render_template('index.html')
 
 
-@app.route("/api/opportunities", methods=["POST"])
-def create_opportunity():
-    data = request.get_json(silent=True)
+# GET: all research opportunities
+@app.route('/api/researchtitles', methods=['GET'])
+def get_research_titles():
+    items = Research.query.order_by(Research.id).all()
+    return jsonify([r.to_dict() for r in items])
 
-    if data is None:
-        return jsonify({"error": "A valid JSON body is required"}), 400
 
-    error = validate_opportunity(data)
+# GET: one research opportunity by id
+@app.route('/api/researchtitles/<int:id>', methods=['GET'])
+def get_research_title(id):
+    research = db.session.get(Research, id)
+    if research:
+        return jsonify(research.to_dict())
+    return jsonify({'message': 'Research title not found'}), 404
 
-    if error:
-        return jsonify({"error": error}), 400
 
-    opportunity = ResearchOpportunity(
-        research_title=data["research_title"].strip(),
-        research_description=data["research_description"].strip(),
-        research_area=data["research_area"].strip(),
-        faculty_name=data["faculty_name"].strip(),
-        department=data["department"].strip(),
-        required_skills=data["required_skills"].strip(),
-        available_positions=data["available_positions"],
-        application_deadline=data["application_deadline"],
-        status=data.get("status", "Open")
-    )
-
-    db.session.add(opportunity)
+# POST: create
+@app.route('/api/researchtitles', methods=['POST'])
+def create_research_title():
+    data, err = read_body()
+    if err:
+        return err
+    research = Research(**{f: data[f] for f in FIELDS})
+    db.session.add(research)
     db.session.commit()
-
-    return jsonify(opportunity.to_dict()), 201
-
-
-@app.route("/api/opportunities", methods=["GET"])
-def get_opportunities():
-    opportunities = ResearchOpportunity.query.all()
-
-    return jsonify([
-        opportunity.to_dict() for opportunity in opportunities
-    ]), 200
+    return jsonify(research.to_dict()), 201
 
 
-@app.route("/api/opportunities/<int:opportunity_id>", methods=["GET"])
-def get_opportunity(opportunity_id):
-    opportunity = db.session.get(ResearchOpportunity, opportunity_id)
-
-    if opportunity is None:
-        return jsonify({"error": "Research opportunity not found"}), 404
-
-    return jsonify(opportunity.to_dict()), 200
-
-
-@app.route("/api/opportunities/<int:opportunity_id>", methods=["PUT"])
-def update_opportunity(opportunity_id):
-    opportunity = db.session.get(ResearchOpportunity, opportunity_id)
-
-    if opportunity is None:
-        return jsonify({"error": "Research opportunity not found"}), 404
-
-    data = request.get_json(silent=True)
-
-    if data is None:
-        return jsonify({"error": "A valid JSON body is required"}), 400
-
-    error = validate_opportunity(data, is_update=True)
-
-    if error:
-        return jsonify({"error": error}), 400
-
-    allowed_fields = [
-        "research_title",
-        "research_description",
-        "research_area",
-        "faculty_name",
-        "department",
-        "required_skills",
-        "available_positions",
-        "application_deadline",
-        "status"
-    ]
-
-    for field in allowed_fields:
-        if field in data:
-            value = data[field]
-
-            if isinstance(value, str):
-                value = value.strip()
-
-            setattr(opportunity, field, value)
-
+# PUT: update
+@app.route('/api/researchtitles/<int:id>', methods=['PUT'])
+def update_research_title(id):
+    research = db.session.get(Research, id)
+    if not research:
+        return jsonify({'message': 'Research title not found'}), 404
+    data, err = read_body()
+    if err:
+        return err
+    for f in FIELDS:
+        setattr(research, f, data[f])
     db.session.commit()
+    return jsonify(research.to_dict())
 
-    return jsonify(opportunity.to_dict()), 200
 
-
-@app.route("/api/opportunities/<int:opportunity_id>", methods=["DELETE"])
-def delete_opportunity(opportunity_id):
-    opportunity = db.session.get(ResearchOpportunity, opportunity_id)
-
-    if opportunity is None:
-        return jsonify({"error": "Research opportunity not found"}), 404
-
-    db.session.delete(opportunity)
+# DELETE
+@app.route('/api/researchtitles/<int:id>', methods=['DELETE'])
+def delete_research_title(id):
+    research = db.session.get(Research, id)
+    if not research:
+        return jsonify({'message': 'Research title not found'}), 404
+    db.session.delete(research)
     db.session.commit()
+    return jsonify({'message': 'Research title deleted successfully'})
 
-    return jsonify({
-        "message": "Research opportunity deleted successfully"
-    }), 200
-@app.errorhandler(500)
-def internal_error(error):
-    db.session.rollback()
-    return jsonify({"error": "Internal server error"}), 500
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)

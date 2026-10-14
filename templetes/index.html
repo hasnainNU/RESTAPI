@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research Portal</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #ece4e4; color: #222; }
+  header { background: #333; color: #fff; padding: 1rem; text-align: center; }
+  header h1 { margin: 0; font-size: 1.4rem; }
+  main { max-width: 900px; margin: 0 auto; padding: 1rem; }
+  section { background: #fff; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+  h2 { margin: 0 0 .75rem; font-size: 1.15rem; }
+  #msg { padding: .7rem 1rem; border-radius: 6px; margin-bottom: 1rem; }
+  .hidden { display: none !important; }
+  #msg.success { background: #d9f2dd; color: #14532d; }
+  #msg.error { background: #f8d7d7; color: #7f1d1d; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: .5rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+  .badge { padding: .15rem .5rem; border-radius: 10px; font-size: .85rem; }
+  .Open { background: #d9f2dd; } .Closed { background: #e5e5e5; }
+  button { padding: .35rem .7rem; border: 0; border-radius: 4px; background: #333; color: #fff; cursor: pointer; font: inherit; font-size: .9rem; margin: 0 .2rem .2rem 0; }
+  button.alt { background: #666; } button.danger { background: #b33; }
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  .full { grid-column: 1 / -1; }
+  label { display: block; font-size: .9rem; margin-bottom: .2rem; }
+  input, textarea, select { width: 100%; padding: .5rem; font: inherit; border: 1px solid #bbb; border-radius: 4px; box-sizing: border-box; }
+  .invalid { border-color: #b33; background: #fff5f5; }
+  #formErr { color: #b33; font-size: .9rem; }
+  dl { display: grid; grid-template-columns: 170px 1fr; gap: .4rem .75rem; margin: 0; }
+  dt { font-weight: bold; } dd { margin: 0; }
+  @media (max-width: 600px) { form { grid-template-columns: 1fr; } dl { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header><h1>Research Portal</h1></header>
+<main>
+  <div id="msg" class="hidden" role="status"></div>
+
+  <section>
+    <h2>Research opportunities</h2>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Title</th><th>Area</th><th>Faculty</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="hidden">No research opportunities yet. Add one below.</p>
+  </section>
+
+  <section id="detailsBox" class="hidden">
+    <h2>Details</h2>
+    <dl id="details"></dl>
+    <p><button class="alt" id="closeDetails">Close details</button></p>
+  </section>
+
+  <section>
+    <h2 id="formTitle">Add a research opportunity</h2>
+    <form id="form" novalidate>
+      <input type="hidden" id="id">
+      <div class="full"><label for="Research_title">Research title *</label><input id="Research_title"></div>
+      <div class="full"><label for="Research_description">Description *</label><textarea id="Research_description" rows="3"></textarea></div>
+      <div><label for="Research_area">Research area *</label><input id="Research_area"></div>
+      <div><label for="Faculty_name">Faculty name *</label><input id="Faculty_name"></div>
+      <div><label for="Departement">Department *</label><input id="Departement"></div>
+      <div><label for="Required_skills">Required skills *</label><input id="Required_skills"></div>
+      <div><label for="Avaliable_positions">Available positions *</label><input id="Avaliable_positions" type="number" min="1"></div>
+      <div><label for="Application_deadline">Application deadline *</label><input id="Application_deadline" type="date"></div>
+      <div><label for="status">Status *</label>
+        <select id="status"><option>Open</option><option>Closed</option></select></div>
+      <div class="full">
+        <div id="formErr"></div>
+        <button type="submit" id="saveBtn">Add opportunity</button>
+        <button type="button" class="alt hidden" id="cancelBtn">Cancel edit</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+<script>
+  const API = "/api/researchtitles";
+  const FIELDS = ["Research_title","Research_description","Research_area","Faculty_name",
+                  "Departement","Required_skills","Avaliable_positions","Application_deadline","status"];
+  const LABELS = {Research_title:"Title", Research_description:"Description", Research_area:"Area",
+    Faculty_name:"Faculty", Departement:"Department", Required_skills:"Required skills",
+    Avaliable_positions:"Available positions", Application_deadline:"Deadline", status:"Status"};
+  const $ = id => document.getElementById(id);
+  let msgTimer;
+
+  function showMsg(text, type) {
+    const m = $("msg");
+    m.textContent = text; m.className = type;
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(() => m.className = "hidden", 5000);
+  }
+
+  async function api(url, options) {
+    let res;
+    try { res = await fetch(url, options); }
+    catch { throw new Error("Cannot reach the server. Is the backend running?"); }
+    let data = null;
+    try { data = await res.json(); } catch {}
+    if (!res.ok) throw new Error((data && data.message) || "Request failed (" + res.status + ")");
+    return data;
+  }
+
+  function send(method, url, body) {
+    return api(url, { method, headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+  }
+
+  // 1. Display all
+  async function loadAll() {
+    try {
+      const items = await api(API);
+      const rows = $("rows"); rows.innerHTML = "";
+      $("empty").className = items.length ? "hidden" : "";
+      items.forEach(r => rows.appendChild(makeRow(r)));
+    } catch (e) { showMsg(e.message, "error"); }
+  }
+
+  function cell(text) { const td = document.createElement("td"); td.textContent = text; return td; }
+  function btn(text, cls, fn) {
+    const b = document.createElement("button"); b.textContent = text; b.className = cls; b.onclick = fn; return b;
+  }
+
+  function makeRow(r) {
+    const tr = document.createElement("tr");
+    tr.append(cell(r.Research_title), cell(r.Research_area), cell(r.Faculty_name));
+    const st = document.createElement("td"), badge = document.createElement("span");
+    badge.className = "badge " + r.status; badge.textContent = r.status; st.appendChild(badge);
+    const act = document.createElement("td");
+    act.append(
+      btn("View", "alt", () => viewOne(r.id)),
+      btn("Edit", "alt", () => editOne(r.id)),
+      btn(r.status === "Open" ? "Mark closed" : "Reopen", "alt", () => toggleStatus(r)),
+      btn("Delete", "danger", () => remove(r))
+    );
+    tr.append(st, act);
+    return tr;
+  }
+
+  // 2. Details
+  async function viewOne(id) {
+    try {
+      const r = await api(API + "/" + id);
+      const dl = $("details"); dl.innerHTML = "";
+      FIELDS.forEach(f => {
+        const dt = document.createElement("dt"), dd = document.createElement("dd");
+        dt.textContent = LABELS[f]; dd.textContent = r[f];
+        dl.append(dt, dd);
+      });
+      $("detailsBox").className = "";
+      $("detailsBox").scrollIntoView({behavior: "smooth"});
+    } catch (e) { showMsg(e.message, "error"); }
+  }
+  $("closeDetails").onclick = () => $("detailsBox").className = "hidden";
+
+  // 4. Edit: load into form
+  async function editOne(id) {
+    try {
+      const r = await api(API + "/" + id);
+      $("id").value = r.id;
+      FIELDS.forEach(f => $(f).value = r[f]);
+      $("formTitle").textContent = "Update research opportunity";
+      $("saveBtn").textContent = "Save changes";
+      $("cancelBtn").className = "alt";
+      clearErrors();
+      $("form").scrollIntoView({behavior: "smooth"});
+    } catch (e) { showMsg(e.message, "error"); }
+  }
+
+  function resetForm() {
+    $("form").reset(); $("id").value = "";
+    $("formTitle").textContent = "Add a research opportunity";
+    $("saveBtn").textContent = "Add opportunity";
+    $("cancelBtn").className = "alt hidden";
+    clearErrors();
+  }
+  $("cancelBtn").onclick = resetForm;
+
+  // 8. Validation
+  function clearErrors() {
+    $("formErr").textContent = "";
+    FIELDS.forEach(f => $(f).classList.remove("invalid"));
+  }
+
+  function validate() {
+    clearErrors();
+    const bad = [];
+    FIELDS.forEach(f => {
+      const el = $(f);
+      if (!el.value.trim()) { el.classList.add("invalid"); bad.push(LABELS[f] + " is required."); }
+    });
+    const pos = Number($("Avaliable_positions").value);
+    if ($("Avaliable_positions").value && (!Number.isInteger(pos) || pos < 1)) {
+      $("Avaliable_positions").classList.add("invalid");
+      bad.push("Available positions must be a whole number of at least 1.");
+    }
+    if (bad.length) $("formErr").textContent = bad.join(" ");
+    return bad.length === 0;
+  }
+
+  // 3 + 4. Create / update
+  $("form").addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!validate()) { showMsg("Please fix the highlighted fields.", "error"); return; }
+    const body = {};
+    FIELDS.forEach(f => body[f] = $(f).value.trim());
+    body.Avaliable_positions = parseInt(body.Avaliable_positions, 10);
+    const id = $("id").value;
+    try {
+      if (id) { await send("PUT", API + "/" + id, body); showMsg("Opportunity updated successfully.", "success"); }
+      else    { await send("POST", API, body);           showMsg("Opportunity created successfully.", "success"); }
+      resetForm(); loadAll();
+    } catch (err) { showMsg(err.message, "error"); }
+  });
+
+  // 5. Open <-> Closed
+  async function toggleStatus(r) {
+    const body = {};
+    FIELDS.forEach(f => body[f] = r[f]);
+    body.status = r.status === "Open" ? "Closed" : "Open";
+    try {
+      await send("PUT", API + "/" + r.id, body);
+      showMsg("Status changed to " + body.status + ".", "success");
+      loadAll();
+    } catch (e) { showMsg(e.message, "error"); }
+  }
+
+  // 6. Delete
+  async function remove(r) {
+    if (!confirm('Delete "' + r.Research_title + '"?')) return;
+    try {
+      await api(API + "/" + r.id, { method: "DELETE" });
+      showMsg("Opportunity deleted successfully.", "success");
+      if ($("id").value == r.id) resetForm();
+      $("detailsBox").className = "hidden";
+      loadAll();
+    } catch (e) { showMsg(e.message, "error"); }
+  }
+
+  loadAll();
+</script>
+</body>
+</html>
